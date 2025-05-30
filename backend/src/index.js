@@ -142,4 +142,14 @@ process.on('unhandledRejection', (err) => {
   process.exit(1);
 });
 
+// In your index.js file, add these lines:
+
+// Import routes
+const playerRoutes = require('./routes/players');
+const tournamentRoutes = require('./routes/tournaments');
+
+// Use routes
+app.use('/api/players', playerRoutes);
+app.use('/api/tournaments', tournamentRoutes);
+
 module.exports = app;
