@@ -3,26 +3,16 @@ const router = express.Router();
 const { supabaseAdmin } = require('../lib/supabase');
 const { authenticate, authorize } = require('../middleware/auth');
 
-// GET /api/tournaments - List/search tournaments (public)
+// GET /api/tournaments - List all tournaments (public)
 router.get('/', async (req, res) => {
   try {
-    const { 
-      state, 
-      format, 
-      status, 
-      from_date, 
-      to_date,
-      limit = 20, 
-      page = 1 
-    } = req.query;
+    const { state, format, status, limit = 20, page = 1 } = req.query;
     
     // Start query builder
     let query = supabaseAdmin.from('tournaments').select(`
       *,
       organizer:profiles!organizer_id(id, full_name),
-      state:states(id, name),
-      city:cities(id, name),
-      player_count:tournament_players(count)
+      state:states(id, name)
     `);
     
     // Apply filters
@@ -38,28 +28,19 @@ router.get('/', async (req, res) => {
       query = query.eq('status', status);
     }
     
-    if (from_date) {
-      query = query.gte('start_date', from_date);
-    }
-    
-    if (to_date) {
-      query = query.lte('end_date', to_date);
-    }
-    
     // Order by date
     query = query.order('start_date', { ascending: false });
     
-    // Handle pagination
+    // Pagination
     const from = (page - 1) * limit;
     const to = from + limit - 1;
-    
     query = query.range(from, to);
     
     const { data, error, count } = await query;
     
     if (error) throw error;
     
-    res.json({
+    return res.status(200).json({
       status: 'success',
       data,
       pagination: {
@@ -70,14 +51,14 @@ router.get('/', async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching tournaments:', error);
-    res.status(500).json({
+    return res.status(500).json({
       status: 'error',
       message: 'Failed to fetch tournaments'
     });
   }
 });
 
-// GET /api/tournaments/:id - Get tournament details (public)
+// GET /api/tournaments/:id - Get a single tournament (public)
 router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -88,19 +69,7 @@ router.get('/:id', async (req, res) => {
         *,
         organizer:profiles!organizer_id(id, full_name),
         state:states(id, name),
-        city:cities(id, name),
-        players:tournament_players(
-          player:players(
-            id, first_name, last_name,
-            ratings(format, rating, is_established)
-          )
-        ),
-        rounds(
-          id, round_number, start_time, end_time,
-          matches(
-            id, white_player_id, black_player_id, result, board
-          )
-        )
+        city:cities(id, name)
       `)
       .eq('id', id)
       .single();
@@ -114,13 +83,44 @@ router.get('/:id', async (req, res) => {
       });
     }
     
-    res.json({
+    // Get players registered for this tournament
+    const { data: players, error: playersError } = await supabaseAdmin
+      .from('tournament_players')
+      .select(`
+        player:players(
+          id, first_name, last_name,
+          ratings(format, rating, is_established)
+        )
+      `)
+      .eq('tournament_id', id);
+    
+    if (playersError) throw playersError;
+    
+    // Get rounds and matches
+    const { data: rounds, error: roundsError } = await supabaseAdmin
+      .from('rounds')
+      .select(`
+        id, round_number, start_time, end_time,
+        matches(
+          id, white_player_id, black_player_id, result, board
+        )
+      `)
+      .eq('tournament_id', id)
+      .order('round_number');
+    
+    if (roundsError) throw roundsError;
+    
+    // Add players and rounds to the tournament data
+    data.players = players.map(p => p.player);
+    data.rounds = rounds;
+    
+    return res.status(200).json({
       status: 'success',
       data
     });
   } catch (error) {
     console.error('Error fetching tournament:', error);
-    res.status(500).json({
+    return res.status(500).json({
       status: 'error',
       message: 'Failed to fetch tournament details'
     });
@@ -150,7 +150,7 @@ router.post('/', authenticate, authorize(['ORGANIZER', 'OFFICER', 'ADMIN']), asy
       });
     }
     
-    // Create the tournament
+    // Create tournament
     const { data, error } = await supabaseAdmin
       .from('tournaments')
       .insert([
@@ -173,19 +173,18 @@ router.post('/', authenticate, authorize(['ORGANIZER', 'OFFICER', 'ADMIN']), asy
     
     if (error) throw error;
     
-    res.status(201).json({
+    return res.status(201).json({
       status: 'success',
       message: 'Tournament created successfully',
       data
     });
   } catch (error) {
     console.error('Error creating tournament:', error);
-    res.status(500).json({
+    return res.status(500).json({
       status: 'error',
       message: 'Failed to create tournament'
     });
   }
 });
 
-// Export the router
 module.exports = router;
