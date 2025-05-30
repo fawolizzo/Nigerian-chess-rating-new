@@ -14,6 +14,7 @@ const authenticate = async (req, res, next) => {
   const token = authHeader.split(' ')[1];
   
   try {
+    // Verify the token with Supabase
     const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
     
     if (error || !user) {
@@ -29,14 +30,6 @@ const authenticate = async (req, res, next) => {
       
     if (profileError) {
       throw new Error('Failed to fetch user profile');
-    }
-    
-    // Check if organizer is approved
-    if (profile.role === 'ORGANIZER' && profile.status !== 'APPROVED') {
-      return res.status(403).json({
-        status: 'error',
-        message: 'Your account is pending approval'
-      });
     }
     
     // Add user info to request
